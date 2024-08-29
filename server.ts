@@ -16,6 +16,9 @@ class Socket {
             const { event: eventName, data, ackId } = JSON.parse(event.data);
             //if ping event, we pong
             if (eventName === "ping") {
+                if (this.socket.readyState !== WebSocket.OPEN) {
+                    return;
+                }
                 this.socket.send(JSON.stringify({ event: "pong" }));
                 return;
             }
@@ -39,12 +42,23 @@ class Socket {
         };
     }
 
-    emit(eventName: string, data: unknown, callback?: (data: unknown) => void) {
+    emit(eventName: string, ...data: unknown[]) {
+
+        let callback: unknown;
+        if (data.length > 0 && typeof data[data.length - 1] === "function") {
+            callback = data.pop();
+        }
+
         const message = {
             event: eventName,
             data,
             ackId: callback ? crypto.randomUUID() : undefined,
         };
+
+        if (this.socket.readyState !== WebSocket.OPEN) {
+            return;
+        }
+
         this.socket.send(JSON.stringify(message));
 
         if (callback && message.ackId) {
@@ -123,7 +137,7 @@ class Server {
         }
     }
 
-    emitToAll(eventName: string, data: unknown) {
+    emitToAll(eventName: string, ...data: unknown[]) {
         this.connections.forEach((socket) => socket.emit(eventName, data));
     }
 
@@ -133,7 +147,7 @@ class Server {
                 s.emit(eventName, data);
             }
         });
-    }
+    } 
 
     emitToClient(socketId: string, eventName: string, data: unknown) {
         const socket = Array.from(this.connections).find((s) => s.id === socketId);
@@ -149,12 +163,13 @@ class Server {
         }
     }
 
-    broadcastToRoom(room: string, eventName: string, socket: Socket, data: unknown) {
+    broadcastToRoom(room: string, eventName: string, socket: Socket, ...data: unknown[]) {
         const sockets = this.rooms.get(room);
+        const d = JSON.stringify(data);
         if (sockets) {
             sockets.forEach((s) => {
                 if (s !== socket) {
-                    s.emit(eventName, data);
+                    s.emit(eventName, d);
                 }
             });
         }
@@ -168,24 +183,32 @@ io.on("connection", (socket) => {
 
     socket.emit("hello", "world");
 
-    socket.on("join", (room: string, callback: unknown) => {
+    socket.on("join", (room: string, username: string, callback: (r: string) => void) => {
         console.log("Received join event", room);
         io.joinRoom(socket, room);
         console.log(`socket ${socket.id} joined room ${room}`);
-        if (typeof callback === "function") {
-            callback(room); // Send the acknowledgment back to the client
-        }
+        socket.emit("server", `You joined room ${room}`, 'join');
+        io.broadcastToRoom(room, "server", socket, `${username} joined room ${room}`, 'join');
+        callback(room); // Send the acknowledgment back to the client
     });
 
-    socket.on("message", (message: string, room: string, fn: () => void) => {
+    socket.on("message", (message: string, username: string, room: string, fn: (status: string) => void) => {
         console.log("Message received:", message);
         console.log("Room:", room);
-        io.broadcastToRoom(room, "message", socket, message);
-        fn();
+        io.broadcastToRoom(room, "message", socket, message, username);
+        fn("ok");
+    });
+
+    socket.on("leave", (room: string, username: string, callback: (r: string) => void) => {
+        callback(room);
+        io.leaveRoom(socket, room);
+        io.broadcastToRoom(room, "server", socket, `${username} left room ${room}`);
+        console.log(`${username} left room ${room}`);
     });
 
     socket.on("disconnect", (reason: string) => {
         console.log(`socket ${socket.id} disconnected due to`, reason);
+        io.emitToAll("server", `${socket.id} disconnected`, 'leave');
     });
 });
 
