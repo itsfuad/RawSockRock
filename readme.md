@@ -2,6 +2,10 @@
 
 RawSockRock is a powerful and flexible real-time communication library that provides seamless WebSocket functionality for both client and server-side applications.
 
+# Why RawSockRock?
+Because socket.io sucks!!!
+Kidding! it's raw, it's sock, and it rocks!
+
 ## Server-Side Usage
 
 The server-side component of RawSockRock is built on top of Socket.IO and Hono, offering a robust and scalable solution for handling WebSocket connections.
