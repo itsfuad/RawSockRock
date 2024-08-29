@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat UI</title>
+    <style>
+        /* Styling omitted for brevity */
+    </style>
+</head>
+<body>
+
+    <div id="chat"></div>
+
+    <div>
+        <input type="text" id="messageInput" placeholder="Type a message">
+        <button id="sendButton">Send</button>
+    </div>
+
+    <script>
+        const chat = document.getElementById("chat");
+        const messageInput = document.getElementById("messageInput");
+        const sendButton = document.getElementById("sendButton");
+
+        class Socket {
+            constructor(url) {
+                this.socket = new WebSocket(url);
+                this.events = new Map();
+                this.ackCallbacks = new Map();
+                this.nextAckId = 0;
+
+                this.socket.onopen = () => {
+                    this.emit("connect");
+                    //after each 10 seconds, send a ping message to the server to keep the connection alive
+                    let interval = setInterval(() => {
+                        if (this.socket.readyState !== WebSocket.OPEN) {
+                            clearInterval(interval);
+                            return;
+                        }
+                        this.socket.send(JSON.stringify({ event: "ping" }));
+                    }, 10000);
+                };
+
+                this.socket.onmessage = (event) => {
+                    const message = JSON.parse(event.data);
+                    const { event: eventName, data, ackId } = message;
+
+                    if (this.events.has(eventName)) {
+                        this.events.get(eventName)(data, (ackData) => {
+                            if (ackId !== undefined) {
+                                this.socket.send(JSON.stringify({ event: ackId, data: ackData }));
+                            }
+                        });
+                    } else if (this.ackCallbacks.has(eventName)) {
+                        this.ackCallbacks.get(eventName)(data);
+                        this.ackCallbacks.delete(eventName);
+                    }
+                };
+
+                this.socket.onclose = () => {
+                    //trigger disconnect event
+                    this.events.get("disconnect")?.("Connection closed");
+                };
+
+                this.socket.onerror = (error) => {
+                    this.events.get("error")?.(error);
+                };
+            }
+
+            on(eventName, callback) {
+                this.events.set(eventName, callback);
+            }
+
+            emit(eventName, ...data) {
+
+                // Last argument is the ack callback (optional)
+                let ackCallback = null;
+                if (typeof data[data.length - 1] === "function") {
+                    ackCallback = data.pop();
+                }
+
+                const ackId = ackCallback ? this.generateAckId() : null;
+
+                this.socket.send(
+                    JSON.stringify({ event: eventName, data, ackId })
+                );
+
+                if (ackCallback) {
+                    this.ackCallbacks.set(ackId, ackCallback);
+                }
+            }
+
+            generateAckId() {
+                return `ack_${this.nextAckId++}`;
+            }
+        }
+
+        const socket = new Socket("ws://localhost:3000/ws");
+
+        // Example usage
+        socket.on("connect", () => {
+            console.log("Connected to server");
+
+            // Join a room
+            socket.emit("join", "room1", (response) => {
+                console.log("Joined room:", response);
+            });
+        });
+
+        // Handle messages from the server
+        socket.on("hello", (data) => {
+            console.log("Server says hello:", data);
+        });
+
+        socket.on("disconnect", (reason) => {
+            console.log("Disconnected from server:", reason);
+        });
+
+        socket.on("message", (data) => {
+            console.log("Message received:", data);
+            addMessage(data, false);
+        });
+
+        // Send a message when the send button is clicked
+        sendButton.addEventListener("click", () => {
+            const message = messageInput.value;
+            socket.emit("message", message, "room1", () => {
+                console.log("Message sent");
+            });
+            addMessage(message, true); // Add self-message immediately
+            messageInput.value = "";
+        });
+
+        messageInput.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                sendButton.click();
+            }
+        });
+
+        function addMessage(message, isSelf = false) {
+            const div = document.createElement("div");
+            div.textContent = message;
+            div.classList.add("message");
+            if (isSelf) {
+                div.classList.add("self");
+            }
+            chat.appendChild(div);
+        }
+    </script>
+
+</body>
+</html>

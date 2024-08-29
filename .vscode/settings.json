@@ -1,0 +1,13 @@
+{
+    "deno.enable": true,
+    "deno.lint": true,
+    "deepscan.enable": true,
+    "Lua.diagnostics.globals": [
+        "redis",
+        "cjson",
+        "ARGV"
+    ],
+    "Lua.diagnostics.disable": [
+        "deprecated"
+    ],
+}
