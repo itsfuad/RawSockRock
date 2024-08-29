@@ -6,7 +6,6 @@ let currentRoom = 'global';
 const form = document.getElementById('form');
 const messageInput = document.getElementById('message');
 const messages = document.getElementById('messageList');
-const roomForm = document.getElementById('roomControls');
 const usernameInput = document.getElementById('username');
 const roomName = document.getElementById('roomName');
 const actionButton = document.getElementById('actionButton');
@@ -17,6 +16,7 @@ let name = '';
 //on input change, update the action button disabled state
 roomName.addEventListener('input', () => {
     actionButton.disabled = roomName.value.trim() === '' || usernameInput.value.trim() === '';
+    currentRoom = roomName.value.trim();
 });
 
 //on input change, update the action button disabled state
@@ -47,6 +47,8 @@ actionButton.addEventListener('click', () => {
     } else {
         socket.emit('leave', currentRoom, usernameInput.value, (response) => {
             console.log('Left the room successfully:', response);
+            roomHeader.textContent = 'Join a room to chat';
+            clearMessages();
         });
     }
 });
