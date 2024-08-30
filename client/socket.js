@@ -6,23 +6,27 @@ export class Socket {
         this.nextAckId = 0;
         this.interval = 0;
         this.isOpen = false;
+        this.autoPing = false;
         this.isClosed = !this.isOpen;
         this.socket.onopen = () => {
             this.isOpen = true;
             this.isClosed = !this.isOpen;
             this.emit("connect");
-            //after each 10 seconds, send a ping message to the server to keep the connection alive
-            this.interval = setInterval(() => {
-                if (this.socket.readyState !== WebSocket.OPEN) {
-                    clearInterval(this.interval);
-                    return;
-                }
-                this.socket.send(JSON.stringify({ event: "ping" }));
-            }, 10000);
+            if (this.autoPing) {
+                //after each 10 seconds, send a ping message to the server to keep the connection alive
+                this.interval = setInterval(() => {
+                    if (this.socket.readyState !== WebSocket.OPEN) {
+                        clearInterval(this.interval);
+                        return;
+                    }
+                    this.socket.send(JSON.stringify({ event: "ping" }));
+                }, 10000);
+            }
         };
         this.socket.onmessage = (event) => {
             const message = JSON.parse(event.data);
             const { event: eventName, data, ackId } = message;
+            console.log('raw message', message, data, message.data);
             if (this.events.has(eventName)) {
                 this.events.get(eventName)?.(...data, (ackData) => {
                     if (ackId !== undefined) {

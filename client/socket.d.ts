@@ -6,6 +6,7 @@ export declare class Socket {
     private interval;
     isOpen: boolean;
     isClosed: boolean;
+    autoPing: boolean;
     constructor(url: string);
     on(eventName: string, callback: () => void): void;
     emit(eventName: string, ...data: unknown[]): void;

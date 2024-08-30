@@ -1,182 +1,40 @@
+// server.ts
+
 import { serve } from "https://deno.land/std@0.166.0/http/server.ts";
 import { Hono } from "https://deno.land/x/hono@v3.12.4/mod.ts";
+import { serveStatic } from "https://deno.land/x/hono@v3.12.4/middleware.ts";
+import { connect } from "https://deno.land/x/redis@v0.32.1/mod.ts";
+import "https://deno.land/x/dotenv@v3.2.2/load.ts";
+const { host, port, password } = Deno.env.toObject();
 
-class Socket {
-    socket: WebSocket;
-    id: string;
-    // deno-lint-ignore ban-types
-    events: Map<string, Function>;
+import { RedisAdapter } from "./redis-adapter/adapter.ts";
+import { Server } from "./websockets/websocket.ts";
 
-    constructor(socket: WebSocket) {
-        this.socket = socket;
-        this.id = crypto.randomUUID();
-        this.events = new Map();
+console.log("Connecting to Redis");
 
-        this.socket.onmessage = (event) => {
-            const { event: eventName, data, ackId } = JSON.parse(event.data);
-            //if ping event, we pong
-            if (eventName === "ping") {
-                if (this.socket.readyState !== WebSocket.OPEN) {
-                    return;
-                }
-                this.socket.send(JSON.stringify({ event: "pong" }));
-                return;
-            }
-            const handler = this.events.get(eventName);
-            if (handler) {
-                console.log(handler);
-                if (ackId) {
-                    console.log("ack found for event", eventName);
-                    handler(...data, (ackData: unknown) => this.emit(ackId, ackData));
-                } else {
-                    handler(...data);
-                }
-            }
-        };
+const pub = await connect({
+	hostname: host,
+	port: +port,
+	password: password,
+	maxRetryCount: 5,
+});
 
-        this.socket.onclose = (event) => {
-            const handler = this.events.get("_disconnect");
-            if (handler) {
-                handler(event.reason || "client disconnected");
-            }
-        };
-    }
+console.log("Connected to Pub");
 
-    emit(eventName: string, ...data: unknown[]) {
+const sub = await connect({
+	hostname: host,
+	port: +port,
+	password: password,
+	maxRetryCount: 5,
+});
 
-        let callback: unknown;
-        if (data.length > 0 && typeof data[data.length - 1] === "function") {
-            callback = data.pop();
-        }
+console.log("Connected to Sub");
 
-        const message = {
-            event: eventName,
-            data,
-            ackId: callback ? crypto.randomUUID() : undefined,
-        };
 
-        if (this.socket.readyState !== WebSocket.OPEN) {
-            return;
-        }
-
-        this.socket.send(JSON.stringify(message));
-
-        if (callback && message.ackId) {
-            this.on(message.ackId, callback);
-        }
-    }
-
-    on(eventName: string, callback: unknown) {
-        if (typeof callback == "function" && callback instanceof Function) {
-            this.events.set(eventName, callback);
-        }
-    }
-}
-
-class Server {
-    private connections: Set<Socket>;
-    private rooms: Map<string, Set<Socket>>;
-    private connectionHandler: ((socket: Socket) => void) | null;
-
-    constructor() {
-        this.connections = new Set();
-        this.rooms = new Map();
-        this.connectionHandler = null;
-    }
-
-    on(eventName: "connection", handler: (socket: Socket) => void) {
-        if (eventName === "connection") {
-            this.connectionHandler = handler;
-        }
-    }
-
-    handler(req: Request) {
-        if (req.headers.get("upgrade") === "websocket") {
-            const { socket, response } = Deno.upgradeWebSocket(req);
-            socket.onopen = () => {
-                const clientSocket = new Socket(socket);
-                this.connections.add(clientSocket);
-
-                if (this.connectionHandler) {
-                    this.connectionHandler(clientSocket);
-                }
-
-                clientSocket.emit("connect", { id: clientSocket.id });
-
-                clientSocket.on("_disconnect", (reason: string) => {
-                    clientSocket.events.get("disconnect")?.(reason);
-                    this.connections.delete(clientSocket);
-                    this.rooms.forEach((sockets, room) => {
-                        sockets.delete(clientSocket);
-                        if (sockets.size === 0) {
-                            this.rooms.delete(room);
-                        }
-                    });
-                });
-            };
-            return response;
-        } else {
-            return new Response("Not a WebSocket request", { status: 400 });
-        }
-    };
-
-    joinRoom(socket: Socket, room: string) {
-        if (!this.rooms.has(room)) {
-            this.rooms.set(room, new Set());
-        }
-        this.rooms.get(room)!.add(socket);
-    }
-
-    leaveRoom(socket: Socket, room: string) {
-        const sockets = this.rooms.get(room);
-        if (sockets) {
-            sockets.delete(socket);
-            if (sockets.size === 0) {
-                this.rooms.delete(room);
-            }
-        }
-    }
-
-    emitToAll(eventName: string, ...data: unknown[]) {
-        this.connections.forEach((socket) => socket.emit(eventName, data));
-    }
-
-    broadcastToAll(eventName: string, socket: Socket, data: unknown) {
-        this.connections.forEach((s) => {
-            if (s !== socket) {
-                s.emit(eventName, data);
-            }
-        });
-    } 
-
-    emitToClient(socketId: string, eventName: string, data: unknown) {
-        const socket = Array.from(this.connections).find((s) => s.id === socketId);
-        if (socket) {
-            socket.emit(eventName, data);
-        }
-    }
-
-    emitToRoom(room: string, eventName: string, data: unknown) {
-        const sockets = this.rooms.get(room);
-        if (sockets) {
-            sockets.forEach((socket) => socket.emit(eventName, data));
-        }
-    }
-
-    broadcastToRoom(room: string, eventName: string, socket: Socket, ...data: unknown[]) {
-        const sockets = this.rooms.get(room);
-        const d = JSON.stringify(data);
-        if (sockets) {
-            sockets.forEach((s) => {
-                if (s !== socket) {
-                    s.emit(eventName, d);
-                }
-            });
-        }
-    }
-}
 
 const io = new Server();
+const adapter = new RedisAdapter(pub, sub, io);
+io.useAdapter(adapter);
 
 io.on("connection", (socket) => {
     console.log(`socket ${socket.id} connected`);
@@ -213,13 +71,31 @@ io.on("connection", (socket) => {
 });
 
 const app = new Hono();
+//cors allows all origins
+app.use((ctx, next) => {
+    ctx.res.headers.set("Access-Control-Allow-Origin", "*");
+    ctx.res.headers.set("Access-Control-Allow-Headers", "*");
+    ctx.res.headers.set("Access-Control-Allow-Methods", "*");
+    return next();
+});
 
 app.get("/ws", (ctx) => {
     return io.handler(ctx.req.raw);
 });
 
-app.get("/", (_) => {
-    return new Response("Hello World");
-});
 
-serve(app.fetch, { port: 3000 });
+app.use('*', serveStatic({ root: './client' }))
+
+const randomPorts = [3000, 3001, 3002, 3003, 3004, 3005, 3006, 3007, 3008, 3009];
+
+for (const port of randomPorts) {
+    try {
+        const listener = Deno.listen({ port });
+        listener.close(); // Release the port immediately
+        await serve(app.fetch, { port });
+        console.log(`Server running on port ${port}`);
+        break;
+    } catch (_) {
+        console.error(`Port ${port} is in use or cannot be opened, trying next port`);
+    }
+}

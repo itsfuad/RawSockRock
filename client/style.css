@@ -180,6 +180,14 @@ body {
     background: #218838;
 }
 
+.room-form button.leave {
+    background: #dc3545;
+}
+
+.room-form button.leave:hover {
+    background: #c82333;
+}
+
 .room-form button:disabled {
     background: #747474;
     color: #fff;

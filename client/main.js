@@ -35,6 +35,7 @@ form.addEventListener('submit', (event) => {
     socket.emit('message', messageInput.value, name, currentRoom, (response) => {
         console.log('Message was acknowledged by the server:', response);
     });
+
     messageInput.value = '';
 });
 
@@ -43,11 +44,15 @@ actionButton.addEventListener('click', () => {
         socket.emit('join', currentRoom, usernameInput.value, (response) => {
             console.log('Joined the room successfully:', response);
             roomHeader.textContent = `Connected to Room: ${roomName.value}`;
+            actionButton.textContent = 'Leave';
+            actionButton.classList.add('leave');
         });
     } else {
         socket.emit('leave', currentRoom, usernameInput.value, (response) => {
             console.log('Left the room successfully:', response);
             roomHeader.textContent = 'Join a room to chat';
+            actionButton.textContent = 'Join';
+            actionButton.classList.remove('leave');
             clearMessages();
         });
     }
@@ -97,12 +102,14 @@ socket.on("message", (data, username) => {
 
 socket.on("server", (data, className) => {
     console.log("Server message:", data);
+    console.log("Server class:", className);
     serverMessage(className, data);
 });
 
 function serverMessage(className, data) {
     const message = document.createElement('li');
-    message.classList.add(className, 'server');
+    message.classList.add('server');
+    message.classList.add(className);
     const name = document.createElement('div');
     name.classList.add('username');
     const text = document.createElement('div');
